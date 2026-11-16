@@ -1,0 +1,35 @@
+# Local credentials, configuration and account sessions
+.env
+.env.*
+!.env.example
+config.yaml
+client.env
+*.key
+*.pem
+*.p12
+*.pfx
+*token*.json
+auths/
+auth-files/
+# Local usage, backups and upstream UI bundle
+*.sqlite*
+*.db
+*.db-*
+*.csv
+*.log
+backups/
+management.html
+management*.html.gz
+# Rebuild native artifacts locally; they embed the source directory
+*.so
+*.so.*
+dist/
+build/
+.shadow/
+# Interpreter/editor files
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.vscode/
+.DS_Store

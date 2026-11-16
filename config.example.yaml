@@ -1,0 +1,12 @@
+# Merge these sections into your existing CPA v8 configuration.
+# Keep your own server, access and management secret settings.
+management:
+  # Required: automatic downloads would overwrite the local session integration.
+  disable-auto-update-panel: true
+plugins:
+  enabled: true
+  dir: /absolute/path/to/cli-proxy-plugins
+  configs:
+    cpa-usage-ledger:
+      enabled: true
+      priority: 1
