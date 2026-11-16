@@ -117,6 +117,9 @@ keys and labels transiently to the authenticated plugin's `/key-labels` endpoint
 receives no raw client keys. Only HMAC identities and labels are saved to SQLite. This fixed
 sync operation does not allow the iframe's general request method to access config endpoints.
 Names refresh when changed, with a 30-second cache for an unchanged name map.
+The UI shows a dimmed key prefix below a name, ending in an ellipsis. Previews contain at most
+eight leading characters, always hide at least half the key, and stay in browser memory;
+they are not stored in SQLite or CSV. Removed keys fall back to a short ledger identity.
 
 Filters, per-key totals, request rows and CSV use a label when available and otherwise retain
 the short identity display. A manually assigned Ledger name overrides the CPA name; clear it

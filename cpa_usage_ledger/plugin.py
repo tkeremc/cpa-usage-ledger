@@ -81,7 +81,7 @@ def dispatch(method, request):
             except (OSError, ValueError):
                 _status['integration_error'] = 'Management Center session integration needs updating.'
         return {"schema_version": 1,
-                "metadata": {"Name": "CPA Usage Ledger", "Version": "0.3.1", "Author": "CPA Usage Ledger contributors", "GitHubRepository": "https://github.com/tkeremc/cpa-usage-ledger", "ConfigFields": []},
+                "metadata": {"Name": "CPA Usage Ledger", "Version": "0.3.2", "Author": "CPA Usage Ledger contributors", "GitHubRepository": "https://github.com/tkeremc/cpa-usage-ledger", "ConfigFields": []},
                 "capabilities": {"usage_plugin": True, "management_api": True}}
     if method in ("plugin.shutdown", "plugin.quiesce"):
         return {}
@@ -119,8 +119,12 @@ def dispatch(method, request):
             data = base64.b64decode(request.get("Body") or "", validate=True)
             if len(data) > 262144:
                 raise ValueError("Request is too large.")
-            ledger().sync_key_labels(json.loads(data))
-            return response({"ok": True})
+            entries = json.loads(data)
+            ledger().sync_key_labels(entries)
+            # Return a bounded preview, never the whole key (even for short keys).
+            previews = {ledger().fingerprint(entry['key']): entry['key'][:min(8, len(entry['key']) // 2)] + '…'
+                        for entry in entries}
+            return response({"ok": True, "key_previews": previews})
         if path == API + "/key-name" and verb == "POST":
             data = base64.b64decode(request.get("Body") or "", validate=True)
             if len(data) > 4096:

@@ -48,8 +48,14 @@ function el(tag, content, cls) { const node=document.createElement(tag);if(conte
 function svg(tag, attrs) { const node=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);return node; }
 function fmt(value) { return formatter.format(value || 0); }
 function duration(value) { return formatter.format(Math.round(Number(value || 0)/10)/100)+' '+t('seconds'); }
-function keyName(key) { return key.name || (key.id==='unattributed'?t('noKey'):t('keyLabel')+' · '+key.id.slice(0,8)); }
-function shortId(id) { return id==='unattributed'?t('noIdentity'):t('identity')+': '+id.slice(0,12); }
+let keyPreviews={};
+function keyName(key) { return key.name || keyPreviews[key.id] || (key.id==='unattributed'?t('noKey'):t('keyLabel')+' · '+key.id.slice(0,8)); }
+function shortId(id) { return id==='unattributed'?t('noIdentity'):t('identity')+': '+id.slice(0,8)+'…'; }
+function keyOptionLabel(key) { return key.name ? key.name+' · '+(keyPreviews[key.id] || shortId(key.id)) : keyName(key); }
+function appendKeyLabel(container,key) {
+  container.append(el('span',keyName(key),'key-title'));
+  if(key.name && key.id!=='unattributed')container.append(el('span',keyPreviews[key.id] || shortId(key.id),'key-sub'));
+}
 let page=1, busy=false, latest=null, pendingRefresh=false;
 let active={};
 function notice(value) { $('notice').hidden=!value;$('notice').textContent=value || ''; }
@@ -122,18 +128,18 @@ function render(data) {
   $('connection').classList.toggle('success',Boolean(c.connected));$('connection').classList.toggle('muted',!c.connected);$('connection-text').textContent=t(c.connected?'active':'disconnected');
   notice(c.invalid?t('invalid',{count:fmt(c.invalid)}):(!s.records?t('noRecords'):''));
   $('last-sync').textContent=c.last_saved?t('lastSync',{time:dateTime.format(new Date(c.last_saved))}):t('waiting');
-  options('key_id',data.keys,keyName,'allKeys');options('model',data.models,null,'allModels');options('provider',data.providers,null,'allProviders');
+  options('key_id',data.keys,keyOptionLabel,'allKeys');options('model',data.models,null,'allModels');options('provider',data.providers,null,'allProviders');
   drawChart(data.days);modelChart(data.by_model);$('keys-table').replaceChildren();
   for(const group of data.groups){
     const row=el('tr'),key={id:group.key_id,name:group.name},title=cell(row,undefined);
-    title.append(el('span',keyName(key),'key-title'),el('span',shortId(key.id)+' · '+t(group.known?'verified':'unverified'),'key-sub'));
+    appendKeyLabel(title,key);
     for(const field of ['records','input_tokens','output_tokens','cached_tokens','reasoning_tokens','total_tokens','failed'])cell(row,fmt(group[field]));
     const action=el('button',t('rename'),'text-button');action.type='button';action.addEventListener('click',()=>{$('editing-key').value=key.id;$('key-name').value=key.name;$('name-dialog').showModal();$('key-name').focus();});cell(row,undefined).append(action);$('keys-table').append(row);
   }
   if(!data.groups.length)emptyTable('keys-table',9);
   $('events-table').replaceChildren();
   for(const event of data.events){
-    const row=el('tr');cell(row,dateTime.format(new Date(event.timestamp)));cell(row,keyName({id:event.key_id,name:event.key_name}));
+    const row=el('tr');cell(row,dateTime.format(new Date(event.timestamp)));appendKeyLabel(cell(row,undefined),{id:event.key_id,name:event.key_name});
     const model=cell(row,undefined);model.append(el('span',event.model,'key-title'),el('span',event.provider,'key-sub'));
     cell(row,undefined).append(el('span',t(event.failed?'failed':'success')+(event.failed&&event.status_code?' · '+event.status_code:''),'status'+(event.failed?' failed':'')));
     cell(row,fmt(event.input_tokens)+' / '+fmt(event.output_tokens));cell(row,fmt(event.total_tokens));cell(row,duration(event.latency_ms));
@@ -147,7 +153,7 @@ async function load() {
   busy=true;$('refresh').disabled=true;
   try{
     let namesFailed=false;
-    try{await window.CPAUsageSession.syncKeyNames();}catch(_){namesFailed=true;}
+    try{const previews=await window.CPAUsageSession.syncKeyNames();if(previews && typeof previews==='object')keyPreviews=previews;}catch(_){namesFailed=true;}
     const response=await authorizedFetch(API+'/report?'+new URLSearchParams({...active,page}));
     if(!response.ok)throw new Error(t(response.status===400?'invalidFilters':'loadFailed'));
     render(await response.json());

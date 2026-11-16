@@ -48,12 +48,14 @@ async function run(){
   state.apiBase=window.location.origin;
   const labelWindow={...window,fetch:async(url,options)=>{
     labelCalls.push({url,options});
-    return {status:200,ok:true,json:async()=>[' fixture-client ']};
+    return {status:200,ok:true,json:async()=>url.endsWith('/api-keys')?[' fixture-client ']:{key_previews:{'preview-id':'sk-ab12…'}}};
   }};
   const labelsContext={window:labelWindow,document:{documentElement},URL,Event,authFixture:{getState:()=>state},helpers:{read:()=>labels,hash:()=> 'hash-fixture-client'}};
   vm.createContext(labelsContext);
   vm.runInContext(bridgeSource.replace('})(authFixture, null);','})(authFixture, helpers);'),labelsContext);
-  assert.equal(await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames(),true);
+  const previews=await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames();
+  assert.equal(previews['preview-id'],'sk-ab12…');
+  assert.equal(JSON.stringify(previews).includes('fixture-client'),false,'only short previews reach the iframe');
   assert.equal(labelCalls[0].url,window.location.origin+'/v8/management/config/access/api-keys');
   assert.deepEqual(JSON.parse(labelCalls[1].options.body),[{key:'fixture-client',name:'Personal app'}]);
   assert.equal(labelCalls[1].options.headers.Authorization,'Bearer fixture-updated-key');
@@ -79,7 +81,8 @@ async function run(){
   await assert.rejects(child.CPAUsageSession.request('/v0/management/plugins/cpa-usage-ledger/report'),error=>error.code==='SESSION_BRIDGE_MISSING');
 
   const attrs={};
-  const uiContext={Intl,URLSearchParams,document:{getElementById:()=>null,querySelectorAll:()=>[],documentElement:{setAttribute:(key,value)=>{attrs[key]=value;}}},window:{}};
+  const labelContainer={children:[],append(...nodes){this.children.push(...nodes);}};
+  const uiContext={Intl,URLSearchParams,labelContainer,document:{createElement:tag=>({tag,textContent:'',className:''}),getElementById:()=>null,querySelectorAll:()=>[],documentElement:{setAttribute:(key,value)=>{attrs[key]=value;}}},window:{}};
   vm.createContext(uiContext);
   const ui=fs.readFileSync(path.join(root,'static/app.js'),'utf8');
   vm.runInContext(ui.slice(0,ui.indexOf('// Initialize the embedded view.')),uiContext);
@@ -90,6 +93,13 @@ async function run(){
   assert.equal(vm.runInContext("fmt(1000)",uiContext),'1.000');
   assert.equal(vm.runInContext("keyName({id:'1234567890abcdef',name:'Personal app'})",uiContext),'Personal app');
   assert.equal(vm.runInContext("keyName({id:'1234567890abcdef',name:''})",uiContext),'Anahtar · 12345678');
+  vm.runInContext("keyPreviews={'preview-id':'sk-ab12…'};appendKeyLabel(labelContainer,{id:'preview-id',name:'Personal app'})",uiContext);
+  assert.deepEqual(labelContainer.children.map(node=>node.textContent),['Personal app','sk-ab12…']);
+  assert.equal(labelContainer.children[1].className,'key-sub');
+  labelContainer.children=[];
+  vm.runInContext("appendKeyLabel(labelContainer,{id:'preview-id',name:''})",uiContext);
+  assert.deepEqual(labelContainer.children.map(node=>node.textContent),['sk-ab12…']);
+  assert.equal(vm.runInContext("keyOptionLabel({id:'preview-id',name:'Personal app'})",uiContext),'Personal app · sk-ab12…');
   const html=fs.readFileSync(path.join(root,'static/index.html'),'utf8');
   const keys=vm.runInContext('Object.keys(messages.en)',uiContext);
   for(const match of html.matchAll(/data-i18n="([^"]+)"/g))assert.ok(keys.includes(match[1]),'missing translation: '+match[1]);

@@ -3,7 +3,7 @@
   'use strict';
   const prefix = '/v0/management/plugins/cpa-usage-ledger/';
   const allowed = new Map([['report', 'GET'], ['export.csv', 'GET'], ['key-name', 'POST']]);
-  let labelSignature = null, labelSyncedAt = 0, labelPending = null;
+  let labelSignature = null, labelSyncedAt = 0, labelPending = null, labelPreviews = {};
   async function authenticatedFetch(url, options = {}) {
     const state = authStore.getState();
     if (!state.isAuthenticated || !state.managementKey) {
@@ -51,7 +51,7 @@
       const apiBase = authStore.getState().apiBase;
       const labels = nameHelpers.read(apiBase);
       const signature = JSON.stringify([apiBase, labels]);
-      if (signature === labelSignature && Date.now() - labelSyncedAt < 30000) return true;
+      if (signature === labelSignature && Date.now() - labelSyncedAt < 30000) return labelPreviews;
       if (labelPending) return labelPending;
       labelPending = (async () => {
         // Client keys stay in the parent page and the authenticated plugin handler.
@@ -68,8 +68,11 @@
           method: 'POST', body: JSON.stringify(entries)
         });
         if (!result.ok) throw new Error('Unable to sync CPA key names.');
+        const payload = await result.json();
+        labelPreviews = payload?.key_previews && typeof payload.key_previews === 'object' && !Array.isArray(payload.key_previews)
+          ? Object.freeze({...payload.key_previews}) : {};
         labelSignature = signature; labelSyncedAt = Date.now();
-        return true;
+        return labelPreviews;
       })();
       try { return await labelPending; } finally { labelPending = null; }
     }

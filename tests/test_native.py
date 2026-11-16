@@ -114,10 +114,13 @@ class NativeTests(unittest.TestCase):
     def test_cpa_names_in_filters_groups_history_and_csv_with_fallbacks(self):
         self.call('usage.handle',self.native_record('fixture-named-key'))
         self.call('usage.handle',self.native_record('fixture-unnamed-key'))
-        status,_=self.management(engine.API+'/key-labels','POST',body=[
+        status,label_data=self.management(engine.API+'/key-labels','POST',body=[
             {'key':'fixture-named-key','name':'Personal app'},
             {'key':'fixture-unnamed-key','name':''}])
         self.assertEqual(status,200)
+        previews=json.loads(label_data)['key_previews']
+        self.assertEqual(previews[engine.ledger().fingerprint('fixture-named-key')],'fixture-…')
+        self.assertNotIn(b'fixture-named-key',label_data)
         _,data=self.management(engine.API+'/report')
         report=json.loads(data);identity=engine.ledger().fingerprint('fixture-named-key')
         self.assertEqual(next(k['name'] for k in report['keys'] if k['id']==identity),'Personal app')
@@ -129,13 +132,22 @@ class NativeTests(unittest.TestCase):
         self.assertNotIn(b'fixture-named-key',data+csv)
         with engine.ledger().connect() as db:
             self.assertNotIn('fixture-named-key',str([tuple(r) for r in db.execute('SELECT * FROM keys')]))
+            self.assertNotIn('fixture-',str([tuple(r) for r in db.execute('SELECT * FROM keys')]))
         engine.ledger().rename_key(identity,'Ledger override')
         engine.ledger().sync_key_labels([{'key':'fixture-named-key','name':'Updated in CPA'}])
-        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'Ledger override')
+        self.assertEqual(next(group['name'] for group in engine.ledger().report({})['groups'] if group['key_id']==identity),'Ledger override')
         engine.ledger().rename_key(identity,'')
-        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'Updated in CPA')
+        self.assertEqual(next(group['name'] for group in engine.ledger().report({})['groups'] if group['key_id']==identity),'Updated in CPA')
         engine.ledger().sync_key_labels([{'key':'fixture-named-key','name':''}])
-        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'')
+        self.assertEqual(next(group['name'] for group in engine.ledger().report({})['groups'] if group['key_id']==identity),'')
+
+    def test_key_previews_never_expose_short_keys_in_full(self):
+        for key,expected in [('a','…'),('xy','x…'),('short','sh…')]:
+            status,data=self.management(engine.API+'/key-labels','POST',body=[{'key':key,'name':''}])
+            self.assertEqual(status,200)
+            preview=json.loads(data)['key_previews'][engine.ledger().fingerprint(key)]
+            self.assertEqual(preview,expected)
+            self.assertLess(len(preview.removesuffix('…')),len(key))
 
     def test_existing_database_migration_retains_names_and_usage(self):
         with sqlite3.connect(engine.STATE/'usage.sqlite3') as db:
