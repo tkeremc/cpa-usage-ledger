@@ -14,7 +14,7 @@ const messages = {
     noKey:'Unattributed',keyLabel:'Key',identity:'ID',noIdentity:'No key identity reported',empty:'No usage records match these filters.',emptyChart:'Your usage will appear here after the first request.',
     noRecords:'No usage recorded yet. Send a model request through CPA to start collecting history.',active:'Connected',disconnected:'Not connected',
     bridgeMissing:'Reload the Management Center once to connect this page to your existing session. No additional sign-in is needed.',
-    authRequired:'Your Management Center session has ended. Sign in through the main panel.',loadFailed:'Unable to load usage history.',invalidFilters:'Check the selected dates and filters.',saveFailed:'Unable to save this key name.',exportFailed:'Unable to export usage history.',
+    authRequired:'Your Management Center session has ended. Sign in through the main panel.',loadFailed:'Unable to load usage history.',invalidFilters:'Check the selected dates and filters.',saveFailed:'Unable to save this key name.',exportFailed:'Unable to export usage history.',nameSyncFailed:'Unable to refresh CPA key names. Previously saved labels are shown.',
     breakdown:'{input} input · {output} output',requests:'{count} distinct request IDs',failures:'{count} failed records',invalid:'{count} malformed records could not be saved.',
     verified:'CPA client key',unverified:'Identity not verified',rename:'Edit name',details:'Details',page:'{count} records · Page {page} of {pages}',
     lastSync:'Last usage: {time} · Refreshes every 10 seconds',waiting:'Waiting for the first usage event',seconds:'s',chartTitle:'Daily token usage',
@@ -32,7 +32,7 @@ const messages = {
     noKey:'Anahtar bilgisi yok',keyLabel:'Anahtar',identity:'Kimlik',noIdentity:'Anahtar kimliği raporlanmadı',empty:'Bu filtrelere ait kullanım kaydı yok.',emptyChart:'İlk istekten sonra kullanım grafiğin burada görünecek.',
     noRecords:'Henüz kayıt yok. Geçmişi toplamaya başlamak için CPA üzerinden bir model isteği gönder.',active:'Bağlı',disconnected:'Bağlantı yok',
     bridgeMissing:'Bu sayfanın mevcut oturumunu kullanması için yönetim panelini bir kez yenile. Ek giriş gerekmiyor.',
-    authRequired:'Yönetim paneli oturumun sona erdi. Ana panelden giriş yap.',loadFailed:'Kullanım geçmişi alınamadı.',invalidFilters:'Seçilen tarihleri ve filtreleri kontrol et.',saveFailed:'Anahtar ismi kaydedilemedi.',exportFailed:'Kullanım geçmişi dışa aktarılamadı.',
+    authRequired:'Yönetim paneli oturumun sona erdi. Ana panelden giriş yap.',loadFailed:'Kullanım geçmişi alınamadı.',invalidFilters:'Seçilen tarihleri ve filtreleri kontrol et.',saveFailed:'Anahtar ismi kaydedilemedi.',exportFailed:'Kullanım geçmişi dışa aktarılamadı.',nameSyncFailed:'CPA anahtar isimleri güncellenemedi. Önceden kaydedilen isimler gösteriliyor.',
     breakdown:'{input} girdi · {output} çıktı',requests:'{count} farklı istek kimliği',failures:'{count} hatalı kayıt',invalid:'{count} kayıt biçim hatası nedeniyle kaydedilemedi.',
     verified:'CPA istemci anahtarı',unverified:'Kimlik doğrulanmadı',rename:'İsmi düzenle',details:'Ayrıntılar',page:'{count} kayıt · Sayfa {page} / {pages}',
     lastSync:'Son kullanım: {time} · 10 saniyede bir yenilenir',waiting:'İlk kullanım olayı bekleniyor',seconds:'sn',chartTitle:'Günlük token kullanımı',
@@ -146,9 +146,12 @@ async function load() {
   if(busy){pendingRefresh=true;return;}
   busy=true;$('refresh').disabled=true;
   try{
+    let namesFailed=false;
+    try{await window.CPAUsageSession.syncKeyNames();}catch(_){namesFailed=true;}
     const response=await authorizedFetch(API+'/report?'+new URLSearchParams({...active,page}));
     if(!response.ok)throw new Error(t(response.status===400?'invalidFilters':'loadFailed'));
     render(await response.json());
+    if(namesFailed)notice(t('nameSyncFailed'));
   }catch(error){notice(error.code==='SESSION_BRIDGE_MISSING'?t('bridgeMissing'):error.message);$('connection').classList.remove('success');$('connection').classList.add('muted');$('connection-text').textContent=t('disconnected');}
   finally{busy=false;$('refresh').disabled=false;if(pendingRefresh){pendingRefresh=false;load();}}
 }

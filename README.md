@@ -12,7 +12,7 @@ changing the file when its integration point is not recognized. This is an indep
 - Durable SQLite history collected through CPA's native usage plugin interface.
 - Filters for date range, client key, model, provider and success/failure.
 - Input, output, cached, reasoning and total tokens; latency and available first-token timing.
-- API key labels, daily charts, request details and CSV export.
+- API key names from Management Center, daily charts, request details and CSV export.
 - Embedded Management Center page using the existing session, with no second sidebar or login.
 - English and Turkish; the page follows the parent's language and light/white/dark theme.
 - Python standard library backend, plain JavaScript frontend, no analytics or CDN assets.
@@ -109,6 +109,22 @@ endpoints. Requests use the current in-memory session, including when “remembe
 The bridge does not return the management key to the iframe or store an extra copy.
 CPA still authenticates each management API request. This is not a security sandbox against
 other scripts on the same origin; only install code you trust into your CPA process and panel.
+
+Management Center stores API key names in browser storage, scoped to the CPA connection;
+they are not part of `config.yaml`. The parent bridge uses the panel's own name helpers,
+reads the current client key list from `/v8/management/config/access/api-keys`, and sends
+keys and labels transiently to the authenticated plugin's `/key-labels` endpoint. The iframe
+receives no raw client keys. Only HMAC identities and labels are saved to SQLite. This fixed
+sync operation does not allow the iframe's general request method to access config endpoints.
+Names refresh when changed, with a 30-second cache for an unchanged name map.
+
+Filters, per-key totals, request rows and CSV use a label when available and otherwise retain
+the short identity display. A manually assigned Ledger name overrides the CPA name; clear it
+to use CPA's name again. Removing a CPA name clears that imported label for the active key.
+Historical labels are retained for keys removed from CPA. If the installed panel has no recognized
+name helpers, Ledger's existing labels and short identities continue to work. Names imported
+from the current browser are stored separately from Ledger's manual names; the existing database
+is migrated without removing usage or key identities.
 
 `patch_management.py` detects the installed auth-store binding, replaces only its own marked
 block, and writes atomically. It keeps one compressed original panel backup at

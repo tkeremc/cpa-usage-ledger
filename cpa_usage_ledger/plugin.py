@@ -81,7 +81,7 @@ def dispatch(method, request):
             except (OSError, ValueError):
                 _status['integration_error'] = 'Management Center session integration needs updating.'
         return {"schema_version": 1,
-                "metadata": {"Name": "CPA Usage Ledger", "Version": "0.3.0", "Author": "CPA Usage Ledger contributors", "GitHubRepository": "https://github.com/tkeremc/cpa-usage-ledger", "ConfigFields": []},
+                "metadata": {"Name": "CPA Usage Ledger", "Version": "0.3.1", "Author": "CPA Usage Ledger contributors", "GitHubRepository": "https://github.com/tkeremc/cpa-usage-ledger", "ConfigFields": []},
                 "capabilities": {"usage_plugin": True, "management_api": True}}
     if method in ("plugin.shutdown", "plugin.quiesce"):
         return {}
@@ -95,7 +95,8 @@ def dispatch(method, request):
     if method == "management.register":
         return {"Routes": [{"Method": "GET", "Path": "/plugins/cpa-usage-ledger/report"},
                            {"Method": "GET", "Path": "/plugins/cpa-usage-ledger/export.csv"},
-                           {"Method": "POST", "Path": "/plugins/cpa-usage-ledger/key-name"}],
+                           {"Method": "POST", "Path": "/plugins/cpa-usage-ledger/key-name"},
+                           {"Method": "POST", "Path": "/plugins/cpa-usage-ledger/key-labels"}],
                 "Resources": [{"Path": "/index.html", "Menu": "Usage history", "Description": "Usage history by API key and date."},
                               {"Path": "/app.js"}, {"Path": "/session.js"}, {"Path": "/style.css"}]}
     if method == "management.handle":
@@ -114,6 +115,12 @@ def dispatch(method, request):
             report = ledger().report(params)
             report["collector"] = dict(_status)
             return response(report)
+        if path == API + "/key-labels" and verb == "POST":
+            data = base64.b64decode(request.get("Body") or "", validate=True)
+            if len(data) > 262144:
+                raise ValueError("Request is too large.")
+            ledger().sync_key_labels(json.loads(data))
+            return response({"ok": True})
         if path == API + "/key-name" and verb == "POST":
             data = base64.b64decode(request.get("Body") or "", validate=True)
             if len(data) > 4096:

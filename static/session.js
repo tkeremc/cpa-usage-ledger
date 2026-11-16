@@ -36,5 +36,8 @@
     }
     return bridge.request(path, options);
   }
-  window.CPAUsageSession = Object.freeze({context, subscribe, request});
+  async function syncKeyNames() {
+    return parentBridge()?.syncKeyNames?.() ?? false;
+  }
+  window.CPAUsageSession = Object.freeze({context, subscribe, request, syncKeyNames});
 })();

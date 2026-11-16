@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import platform
+import sqlite3
 from pathlib import Path
 import sys
 import tempfile
@@ -109,6 +110,44 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(status,200)
         _,data=self.management(engine.API+'/report',query={'key_id':[key_id]})
         self.assertEqual(json.loads(data)['groups'][0]['name'],'My application')
+
+    def test_cpa_names_in_filters_groups_history_and_csv_with_fallbacks(self):
+        self.call('usage.handle',self.native_record('fixture-named-key'))
+        self.call('usage.handle',self.native_record('fixture-unnamed-key'))
+        status,_=self.management(engine.API+'/key-labels','POST',body=[
+            {'key':'fixture-named-key','name':'Personal app'},
+            {'key':'fixture-unnamed-key','name':''}])
+        self.assertEqual(status,200)
+        _,data=self.management(engine.API+'/report')
+        report=json.loads(data);identity=engine.ledger().fingerprint('fixture-named-key')
+        self.assertEqual(next(k['name'] for k in report['keys'] if k['id']==identity),'Personal app')
+        self.assertEqual(next(k['name'] for k in report['groups'] if k['key_id']==identity),'Personal app')
+        self.assertEqual(next(k['key_name'] for k in report['events'] if k['key_id']==identity),'Personal app')
+        self.assertTrue(any(not k['name'] for k in report['keys']))
+        _,csv=self.management(engine.API+'/export.csv')
+        self.assertIn(b'Personal app',csv)
+        self.assertNotIn(b'fixture-named-key',data+csv)
+        with engine.ledger().connect() as db:
+            self.assertNotIn('fixture-named-key',str([tuple(r) for r in db.execute('SELECT * FROM keys')]))
+        engine.ledger().rename_key(identity,'Ledger override')
+        engine.ledger().sync_key_labels([{'key':'fixture-named-key','name':'Updated in CPA'}])
+        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'Ledger override')
+        engine.ledger().rename_key(identity,'')
+        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'Updated in CPA')
+        engine.ledger().sync_key_labels([{'key':'fixture-named-key','name':''}])
+        self.assertEqual(engine.ledger().report({})['groups'][0]['name'],'')
+
+    def test_existing_database_migration_retains_names_and_usage(self):
+        with sqlite3.connect(engine.STATE/'usage.sqlite3') as db:
+            db.execute("CREATE TABLE keys(id TEXT PRIMARY KEY,name TEXT NOT NULL DEFAULT '',known INTEGER NOT NULL DEFAULT 0,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL)")
+            db.execute("INSERT INTO keys VALUES('legacy-id','Existing label',1,'2026-11-16','2026-11-16')")
+        self.call('usage.handle',self.native_record())
+        report=engine.ledger().report({})
+        self.assertEqual(report['summary']['records'],1)
+        self.assertTrue(any(k['name']=='Existing label' for k in report['keys']))
+        with engine.ledger().connect() as db:
+            self.assertIn('cpa_name',[r[1] for r in db.execute('PRAGMA table_info(keys)')])
+        self.assertEqual(self.management(engine.API+'/key-labels','POST',body=[{'key':'fixture-client-key','name':123}])[0],400)
 
     def test_public_resources_do_not_expose_private_report(self):
         self.call('usage.handle',self.native_record())

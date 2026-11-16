@@ -1,8 +1,25 @@
 /* The authenticated Management Center owns this bridge. It never returns its key. */
-((authStore) => {
+((authStore, nameHelpers) => {
   'use strict';
   const prefix = '/v0/management/plugins/cpa-usage-ledger/';
   const allowed = new Map([['report', 'GET'], ['export.csv', 'GET'], ['key-name', 'POST']]);
+  let labelSignature = null, labelSyncedAt = 0, labelPending = null;
+  async function authenticatedFetch(url, options = {}) {
+    const state = authStore.getState();
+    if (!state.isAuthenticated || !state.managementKey) {
+      throw new Error('The Management Center session is not authenticated.');
+    }
+    const response = await window.fetch(url, {
+      ...options,
+      headers: {
+        Authorization: 'Bearer ' + state.managementKey,
+        ...(options.method === 'POST' ? {'Content-Type': 'application/json'} : {})
+      },
+      credentials: 'omit', redirect: 'error', cache: 'no-store'
+    });
+    if (response.status === 401) window.dispatchEvent(new Event('unauthorized'));
+    return response;
+  }
   const bridge = Object.freeze({
     getContext() {
       const state = authStore.getState();
@@ -23,25 +40,39 @@
       if (method === 'POST' && (typeof options.body !== 'string' || options.body.length > 4096)) {
         throw new Error('Invalid usage request.');
       }
-      const state = authStore.getState();
-      if (!state.isAuthenticated || !state.managementKey) {
-        throw new Error('The Management Center session is not authenticated.');
-      }
-      const response = await window.fetch(url.href, {
+      return authenticatedFetch(url.href, {
         method,
-        headers: {
-          Authorization: 'Bearer ' + state.managementKey,
-          ...(method === 'POST' ? {'Content-Type': 'application/json'} : {})
-        },
         body: method === 'POST' ? options.body : undefined,
-        signal: options.signal,
-        credentials: 'omit',
-        redirect: 'error',
-        cache: 'no-store'
+        signal: options.signal
       });
-      if (response.status === 401) window.dispatchEvent(new Event('unauthorized'));
-      return response;
+    },
+    async syncKeyNames() {
+      if (!nameHelpers) return false;
+      const apiBase = authStore.getState().apiBase;
+      const labels = nameHelpers.read(apiBase);
+      const signature = JSON.stringify([apiBase, labels]);
+      if (signature === labelSignature && Date.now() - labelSyncedAt < 30000) return true;
+      if (labelPending) return labelPending;
+      labelPending = (async () => {
+        // Client keys stay in the parent page and the authenticated plugin handler.
+        const source = await authenticatedFetch(new URL('/v8/management/config/access/api-keys', window.location.origin).href);
+        if (!source.ok) throw new Error('Unable to read CPA key names.');
+        const keys = await source.json();
+        if (!Array.isArray(keys) || keys.length > 1000 || keys.some(key => typeof key !== 'string')) {
+          throw new Error('Invalid CPA key list.');
+        }
+        if (authStore.getState().apiBase !== apiBase) throw new Error('The CPA connection changed.');
+        const entries = keys.map(key => key.trim()).filter(Boolean)
+          .map(key => ({key, name: labels[nameHelpers.hash(apiBase, key)] || ''}));
+        const result = await authenticatedFetch(new URL(prefix + 'key-labels', window.location.origin).href, {
+          method: 'POST', body: JSON.stringify(entries)
+        });
+        if (!result.ok) throw new Error('Unable to sync CPA key names.');
+        labelSignature = signature; labelSyncedAt = Date.now();
+        return true;
+      })();
+      try { return await labelPending; } finally { labelPending = null; }
     }
   });
   Object.defineProperty(window, '__CPA_USAGE_BRIDGE__', {value: bridge, configurable: true});
-})(__CPA_AUTH_STORE__);
+})(__CPA_AUTH_STORE__, __CPA_NAME_HELPERS__);

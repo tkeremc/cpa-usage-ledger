@@ -12,7 +12,7 @@ async function run(){
   const window={location:{origin:'http://127.0.0.1:8317'},fetch:async(url,options)=>{calls.push({url,options});return {status:200};},dispatchEvent:event=>events.push(event.type)};
   const context={window,document:{documentElement},URL,Event,authFixture:{getState:()=>state}};
   vm.createContext(context);
-  const bridgeSource=fs.readFileSync(path.join(root,'panel_bridge.js'),'utf8').replaceAll('__CPA_AUTH_STORE__','authFixture');
+  const bridgeSource=fs.readFileSync(path.join(root,'panel_bridge.js'),'utf8').replaceAll('__CPA_AUTH_STORE__','authFixture').replaceAll('__CPA_NAME_HELPERS__','null');
   vm.runInContext(bridgeSource,context);
   const bridge=window.__CPA_USAGE_BRIDGE__;
   assert.equal(bridge.getContext().authenticated,true);
@@ -30,6 +30,7 @@ async function run(){
   assert.equal(calls[2].options.headers.Authorization,'Bearer fixture-updated-key');
   for(const [url,options] of [
     ['/v8/management/config',{}],
+    ['/v0/management/plugins/cpa-usage-ledger/key-labels',{method:'POST',body:'[]'}],
     ['https://external.example/v0/management/plugins/cpa-usage-ledger/report',{}],
     ['/v0/management/plugins/cpa-usage-ledger/report',{method:'POST',body:'{}'}],
     ['/v0/management/plugins/cpa-usage-ledger/key-name',{method:'POST',body:'x'.repeat(5000)}]
@@ -41,6 +42,29 @@ async function run(){
   window.fetch=async()=>({status:401});
   await bridge.request('/v0/management/plugins/cpa-usage-ledger/report');
   assert.deepEqual(events,['unauthorized']);
+
+  const labelCalls=[];
+  let labels={'hash-fixture-client':'Personal app'};
+  state.apiBase=window.location.origin;
+  const labelWindow={...window,fetch:async(url,options)=>{
+    labelCalls.push({url,options});
+    return {status:200,ok:true,json:async()=>[' fixture-client ']};
+  }};
+  const labelsContext={window:labelWindow,document:{documentElement},URL,Event,authFixture:{getState:()=>state},helpers:{read:()=>labels,hash:()=> 'hash-fixture-client'}};
+  vm.createContext(labelsContext);
+  vm.runInContext(bridgeSource.replace('})(authFixture, null);','})(authFixture, helpers);'),labelsContext);
+  assert.equal(await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames(),true);
+  assert.equal(labelCalls[0].url,window.location.origin+'/v8/management/config/access/api-keys');
+  assert.deepEqual(JSON.parse(labelCalls[1].options.body),[{key:'fixture-client',name:'Personal app'}]);
+  assert.equal(labelCalls[1].options.headers.Authorization,'Bearer fixture-updated-key');
+  await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames();
+  assert.equal(labelCalls.length,2,'unchanged names use a short cache');
+  labels={'hash-fixture-client':'Renamed in CPA'};
+  await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames();
+  assert.equal(JSON.parse(labelCalls[3].options.body)[0].name,'Renamed in CPA');
+  labels={};
+  await labelWindow.__CPA_USAGE_BRIDGE__.syncKeyNames();
+  assert.equal(JSON.parse(labelCalls[5].options.body)[0].name,'');
 
   let observed;
   const parent={location:window.location,document:{documentElement},__CPA_USAGE_BRIDGE__:bridge};
@@ -64,6 +88,8 @@ async function run(){
   assert.equal(vm.runInContext("setContext({language:'tr',theme:'white'});t('title')",uiContext),'Kullanım geçmişi');
   assert.equal(attrs['data-theme'],'white');
   assert.equal(vm.runInContext("fmt(1000)",uiContext),'1.000');
+  assert.equal(vm.runInContext("keyName({id:'1234567890abcdef',name:'Personal app'})",uiContext),'Personal app');
+  assert.equal(vm.runInContext("keyName({id:'1234567890abcdef',name:''})",uiContext),'Anahtar · 12345678');
   const html=fs.readFileSync(path.join(root,'static/index.html'),'utf8');
   const keys=vm.runInContext('Object.keys(messages.en)',uiContext);
   for(const match of html.matchAll(/data-i18n="([^"]+)"/g))assert.ok(keys.includes(match[1]),'missing translation: '+match[1]);

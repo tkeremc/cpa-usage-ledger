@@ -13,7 +13,7 @@ UTC = timezone.utc
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS keys (
- id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', known INTEGER NOT NULL DEFAULT 0,
+ id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', cpa_name TEXT NOT NULL DEFAULT '', known INTEGER NOT NULL DEFAULT 0,
  first_seen TEXT NOT NULL, last_seen TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -67,6 +67,8 @@ class Ledger:
         self.path = state / "usage.sqlite3"
         with self.connect() as db:
             db.executescript(SCHEMA)
+            if 'cpa_name' not in {row[1] for row in db.execute('PRAGMA table_info(keys)')}:
+                db.execute("ALTER TABLE keys ADD COLUMN cpa_name TEXT NOT NULL DEFAULT ''")
             db.execute("PRAGMA journal_mode=WAL")
         self.path.chmod(0o600)
 
@@ -96,6 +98,21 @@ class Ledger:
                     continue
                 db.execute("""INSERT INTO keys(id,known,first_seen,last_seen) VALUES(?,1,?,?)
                     ON CONFLICT(id) DO UPDATE SET known=1""", (self.fingerprint(key), now(), now()))
+
+    def sync_key_labels(self, entries):
+        if not isinstance(entries, list) or len(entries) > 1000:
+            raise ValueError('Invalid key label list')
+        updates = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError('Invalid key label')
+            key, name = entry.get('key'), entry.get('name')
+            if not isinstance(key, str) or not key or len(key) > 16384 or not isinstance(name, str) or len(name) > 500:
+                raise ValueError('Invalid key label')
+            updates.append((name.strip(), self.fingerprint(key)))
+        # Only fingerprints and labels reach SQLite; client keys remain transient.
+        with self.connect() as db:
+            db.executemany('UPDATE keys SET cpa_name=? WHERE id=?', updates)
 
     def normalize(self, event):
         if not isinstance(event, dict):
@@ -218,9 +235,9 @@ class Ledger:
             COUNT(DISTINCT NULLIF(e.request_id,'')) AS identified_requests"""
         with self.connect() as db:
             summary = dict(db.execute("SELECT " + aggregate + " FROM events e" + where, values).fetchone())
-            keys = [dict(r) for r in db.execute("SELECT * FROM keys ORDER BY name,first_seen")]
+            keys = [dict(r) for r in db.execute("SELECT id,COALESCE(NULLIF(name,''),cpa_name) AS name,known,first_seen,last_seen FROM keys ORDER BY name,first_seen")]
             groups = [dict(r) for r in db.execute(
-                "SELECT e.key_id,k.name,k.known," + aggregate + " FROM events e JOIN keys k ON k.id=e.key_id" +
+                "SELECT e.key_id,COALESCE(NULLIF(k.name,''),k.cpa_name) AS name,k.known," + aggregate + " FROM events e JOIN keys k ON k.id=e.key_id" +
                 where + " GROUP BY e.key_id ORDER BY total_tokens DESC", values)]
             days = [dict(r) for r in db.execute(
                 "SELECT e.day,COUNT(*) AS records,SUM(e.total_tokens) AS tokens FROM events e" +
@@ -229,7 +246,7 @@ class Ledger:
                 "SELECT e.model,COUNT(*) AS records,SUM(e.total_tokens) AS tokens FROM events e" +
                 where + " GROUP BY e.model ORDER BY tokens DESC", values)]
             events = [dict(r) for r in db.execute(
-                "SELECT e.*,k.name AS key_name,k.known FROM events e JOIN keys k ON k.id=e.key_id" +
+                "SELECT e.*,COALESCE(NULLIF(k.name,''),k.cpa_name) AS key_name,k.known FROM events e JOIN keys k ON k.id=e.key_id" +
                 where + " ORDER BY e.timestamp DESC,e.id DESC LIMIT ? OFFSET ?", values + [size, (page-1)*size])]
             for event in events:
                 event.pop("identity")
@@ -243,7 +260,7 @@ class Ledger:
     def export(self, params):
         where, values = self.filters(params)
         with self.connect() as db:
-            cursor = db.execute("""SELECT e.timestamp,k.name AS key_name,e.key_id,e.provider,e.model,e.alias,
+            cursor = db.execute("""SELECT e.timestamp,COALESCE(NULLIF(k.name,''),k.cpa_name) AS key_name,e.key_id,e.provider,e.model,e.alias,
                 e.endpoint,e.auth_index,e.request_id,e.execution_id,e.failed,e.status_code,e.latency_ms,
                 e.input_tokens,e.output_tokens,e.reasoning_tokens,e.cached_tokens,e.total_tokens,e.metadata
                 FROM events e JOIN keys k ON e.key_id=k.id""" + where + " ORDER BY e.timestamp,e.id", values)
